@@ -14,4 +14,4 @@ module update_master (
 );
 ´´´´
 
-![master_pin](https://github.com/user-attachments/assets/a92258a8-8de9-437b-a75b-a115dbc31b7d)
+![Forma de onda da simulação do update_master](./assets/waveform_update_master.png)
