@@ -14,4 +14,4 @@ module update_master (
 );
 ```
 
-![Descrição da minha imagem](Diagrams/master_pin.jpg)
+![Master_Pin](Diagrams/master_pin.jpg)
