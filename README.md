@@ -11,6 +11,7 @@ module update_master (
     input  logic       enable,
     input  pinPac_t    pin_in,
     output pinPac_t    new_master_pin
-);´´´
+);
+```
 
 ![Descrição da minha imagem](Diagrams/master_pin.jpg)
