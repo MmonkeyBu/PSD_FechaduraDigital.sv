@@ -13,4 +13,5 @@ module update_master (
     output pinPac_t    new_master_pin
 );
 ´´´´
-![image](https://github.com/user-attachments/assets/ce726652-318a-466d-bf72-456ddce575f5)
+
+![master_pin](https://github.com/user-attachments/assets/a92258a8-8de9-437b-a75b-a115dbc31b7d)
