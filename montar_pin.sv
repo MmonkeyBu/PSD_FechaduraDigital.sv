@@ -5,50 +5,84 @@ module montar_pin (
     input logic [3:0] key_code,
     output pinPac_t pin_out
 );
+
     // --- Constantes ---
+    localparam KEY_SEND = 4'hF; 
+    localparam DIGIT_BLANK = 4'hA; 
 
-    localparam KEY_SEND = 4'hE; 
-    localparam INVALID_PIN = 16'hFFFF;
-
-    // --- Sinais Internos ---
-    // Buffer interno para montar a senha de forma segura, sem afetar a saída
-    logic [15:0] pin_buffer; 
+    // Flag auxiliar para gerenciar a limpeza do PIN no ciclo seguinte ao envio/limissão.
+    logic pending_clear;
 
     // --- Lógica de Detecção de Borda ---
     logic tecla_valid_d1;
     logic tecla_valid_posedge;
 
     always_ff @(posedge clk or posedge rst) begin:DetectorDeBorda
-        if (rst) tecla_valid_d1 <= 1'b0;
-        else     tecla_valid_d1 <= key_valid;
+        if (rst) begin
+            tecla_valid_d1 <= 1'b0;
+        end else begin
+            tecla_valid_d1 <= key_valid;
+        end
     end:DetectorDeBorda
 
-    
     assign tecla_valid_posedge = key_valid && !tecla_valid_d1;
 
-    // --- Lógica Principal de Estado do PIN ---
+    // --- Lógica Principal de Montagem e Estado do PIN ---
     always_ff @(posedge clk or posedge rst) begin:RegDeslocamento
         if (rst) begin
-            pin_out <= '{default: '0}; // Reseta a saída
-            pin_buffer <= 16'h0000;    // Reseta o buffer interno
+            pin_out.status <= 1'b0;
+            pin_out.digit1 <= DIGIT_BLANK;
+            pin_out.digit2 <= DIGIT_BLANK;
+            pin_out.digit3 <= DIGIT_BLANK;
+            pin_out.digit4 <= DIGIT_BLANK;
+            pending_clear <= 1'b0; 
         end else begin
 
-            if (tecla_valid_posedge) begin
+            /*--- Fase 1: Limpeza / Reset de Pulso ---
+                * Garante que o modulo só envie pin_out.status por um pulso
+             */ 
+            if (pending_clear) begin
+                pin_out.status <= 1'b0; 
+                pin_out.digit1 <= DIGIT_BLANK;
+                pin_out.digit2 <= DIGIT_BLANK;
+                pin_out.digit3 <= DIGIT_BLANK;
+                pin_out.digit4 <= DIGIT_BLANK;
+                pending_clear <= 1'b0; 
+            end else begin
+                pin_out.status <= 1'b0;
+            end
 
-                if (key_code == KEY_SEND) begin: envia_pin
+
+            // --- Fase 2: Processamento do Pressionamento de Tecla ---
+
+            if (tecla_valid_posedge) begin
+                if (key_code == KEY_SEND) begin 
 
                     pin_out.status <= 1'b1;
-                    {pin_out.digit4, pin_out.digit3, pin_out.digit2, pin_out.digit1} <= pin_buffer;
+                    pending_clear <= 1'b1;
 
-                end:envia_pin else begin: shifta_pin
+                end
+                // Limpa a tela, comportamento simples e direto (se for necessario, e o professor quiser, posso limpar um por vez também)
+                else if (key_code == 4'hE) begin 
 
-                    pin_out.status <= 1'b0; 
-                    {pin_out.digit4, pin_out.digit3, pin_out.digit2, pin_out.digit1} <= INVALID_PIN; 
-                    
+                    pin_out.digit1 <= DIGIT_BLANK;
+                    pin_out.digit2 <= DIGIT_BLANK;
+                    pin_out.digit3 <= DIGIT_BLANK;
+                    pin_out.digit4 <= DIGIT_BLANK;
+                    pin_out.status <= 1'b0;
+                    pending_clear <= 1'b0; 
 
-                    pin_buffer <= {pin_buffer[11:0], key_code};
+                end
+                else begin // É um dígito normal (0-9, A-D)
 
-                end:shifta_pin
+                    pin_out.digit4 <= pin_out.digit3;
+                    pin_out.digit3 <= pin_out.digit2;
+                    pin_out.digit2 <= pin_out.digit1;
+                    pin_out.digit1 <= key_code;
+                    pin_out.status <= 1'b0;
+                    pending_clear <= 1'b0;
+
+                end
             end
         end
     end:RegDeslocamento
