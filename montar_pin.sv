@@ -75,10 +75,10 @@ module montar_pin (
                 end
                 else begin // É um dígito normal (0-9, A-D)
 
-                    pin_out.digit4 <= pin_out.digit3;
-                    pin_out.digit3 <= pin_out.digit2;
-                    pin_out.digit2 <= pin_out.digit1;
-                    pin_out.digit1 <= key_code;
+                    pin_out.digit1 <= pin_out.digit2;
+                    pin_out.digit2 <= pin_out.digit3;
+                    pin_out.digit3 <= pin_out.digit4;
+                    pin_out.digit4 <= key_code;
                     pin_out.status <= 1'b0;
                     pending_clear <= 1'b0;
 
