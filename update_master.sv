@@ -17,18 +17,18 @@ module update_master (
     always_ff @(posedge clk or posedge rst) begin
         if (rst) begin
             new_master_pin.status <= 1'b0;
-            new_master_pin.digit1 <= 4'hF;  // Valor inválido (15)
-            new_master_pin.digit2 <= 4'hF;  // Valor inválido (15) 
-            new_master_pin.digit3 <= 4'hF;  // Valor inválido (15)
-            new_master_pin.digit4 <= 4'hF;  // Valor inválido (15)
+            new_master_pin.digit1 <= 4'hF;  
+            new_master_pin.digit2 <= 4'hF;  
+            new_master_pin.digit3 <= 4'hF;  
+            new_master_pin.digit4 <= 4'hF;  
         end else begin
             if (enable) begin 
-                // O campo 'pin_in.status' se torna '1' quando o usuário pressiona '*'
+                
                 if (pin_in.status) begin
-                    // Verifica se os dígitos recebidos são válidos (0-9)
+                    
                     if ((pin_in.digit1 <= 4'd9) && (pin_in.digit2 <= 4'd9) && 
                         (pin_in.digit3 <= 4'd9) && (pin_in.digit4 <= 4'd9)) begin
-                        // PIN válido: atualiza o master PIN
+                        
                         new_master_pin.status <= 1'b1;
                         new_master_pin.digit1 <= pin_in.digit1;
                         new_master_pin.digit2 <= pin_in.digit2;
@@ -38,10 +38,16 @@ module update_master (
                         // PIN inválido: mantém status em 0
                         new_master_pin.status <= 1'b0;
                     end
-                end else begin
-                    // Se não há confirmação, mantém status em 0 para próxima confirmação
+                end else begin                    
                     new_master_pin.status <= 1'b0;
                 end
+              
+            end else begin
+                new_master_pin.status <= 1'b0;
+                new_master_pin.digit1 <= 4'hF;  
+                new_master_pin.digit2 <= 4'hF;  
+                new_master_pin.digit3 <= 4'hF;  
+                new_master_pin.digit4 <= 4'hF;  
             end
         end
     end
