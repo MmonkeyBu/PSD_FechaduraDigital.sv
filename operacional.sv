@@ -130,14 +130,11 @@ module operacional (
                 RESET: begin
                     tranca <= 1'b1; // Mantém travado no reset
                     if(sensor_de_contato) begin
-                        next_state <= TRAVA_ON;
+                        next_state <= MONTAR_PIN;
                     end
                 end
 
-                TRAVA_ON: begin
-                    tranca <= 1'b1;
-                    next_state <= MONTAR_PIN;
-                end
+                
 
                 MONTAR_PIN: begin
                     bcd_out_reg.BCD3 = pin_sinal_interno.digit1;
@@ -225,6 +222,11 @@ module operacional (
                     end else begin
                         next_state <= PORTA_ABERTA;
                     end
+                end
+
+                TRAVA_ON: begin
+                    tranca <= 1'b1;
+                    next_state <= MONTAR_PIN;
                 end
                     
                 PORTA_FECHADA: begin
