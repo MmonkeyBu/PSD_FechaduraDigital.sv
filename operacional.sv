@@ -92,8 +92,7 @@ module operacional (
         bcd_enable_reg = 1'b0;
         // Manter saídas e registradores por padrão
         tranca_reg = tranca;
-        // ... outros valores padrão ...
-
+	    
         case (current_state)
             S_RESET: begin
                 // Conforme o diagrama, espera a porta fechar para iniciar
