@@ -125,10 +125,6 @@ module operacional (
                 end else if (senha_master && senha_master_update_reg) begin
                     next_state = S_SETUP;
                     setup_on_reg = 1'b1; // Ativa o modo setup
-                end else if (senha_master && !senha_master_update_reg) begin
-                    // Senha mestre padrão foi inserida, precisa atualizar
-                    next_state = S_UPDATE_MASTER; // Este estado não está no diagrama, mas é uma boa prática
-                                                  // O diagrama vai direto para Montar PIN após o update
                 end else if (senha_fail) {
                     next_state = S_ESPERA;
                 end
