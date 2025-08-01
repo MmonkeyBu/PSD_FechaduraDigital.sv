@@ -134,8 +134,6 @@ module operacional (
                     end
                 end
 
-                
-
                 MONTAR_PIN: begin
                     bcd_out_reg.BCD3 = pin_sinal_interno.digit1;
                     bcd_out_reg.BCD2 = pin_sinal_interno.digit2;
@@ -211,57 +209,44 @@ module operacional (
                 end
                 
                 TRAVA_OFF: begin
-                    bcd_out_reg = '{default:'hB}; // 'C' para apagar ou traço, depende do driver
-                    bcd_enable_reg = 1'b1;
-                    tranca <= 0;
-                    contagem_travamento <= 0;
-                    contagem_bip <= 0;
-                    // Decide para onde ir com base no sensor
-                    if (sensor_de_contato) begin
-                        next_state <= PORTA_FECHADA;
-                    end else begin
-                        next_state <= PORTA_ABERTA;
-                    end
+                    next_state <= PORTA_FECHADA;
                 end
-
                 TRAVA_ON: begin
-                    tranca <= 1'b1;
                     next_state <= MONTAR_PIN;
                 end
-                    
+                
                 PORTA_FECHADA: begin
-                    tranca <= 0; // Permanece destravado
-                    if (!sensor_de_contato) begin // Se a porta abrir
+                    if (!sensor_de_contato) begin
                         contagem_travamento <= 0;
                         next_state <= PORTA_ABERTA;
                     end
-                    // Se o tempo de auto-travamento expirar ou o botão interno for pressionado
                     else if ((contagem_travamento >= (data_setup_reg.tranca_aut_time * CLK_FREQ_HZ)) || botao_interno) begin
                         next_state <= TRAVA_ON;
                     end
                     else begin
                         contagem_travamento <= contagem_travamento + 1;
+                        next_state <= next_state; 
                     end
                 end
 
                 PORTA_ABERTA: begin
-                    tranca <= 0; // Permanece destravado
-                    if (sensor_de_contato) begin // Se a porta fechar
+                    if (sensor_de_contato) begin
                         contagem_bip <= 0;
+                        contagem_travamento <= 0; 
+                        bip <= 0;
                         next_state <= PORTA_FECHADA;
                     end
                     else begin
-                        // Incrementa o contador do bip
                         if (contagem_bip < (data_setup_reg.bip_time * CLK_FREQ_HZ)) begin 
                             contagem_bip <= contagem_bip + 1;
                         end
-                        // Se o tempo expirar e o bip estiver habilitado, ativa o bip
                         if ((contagem_bip >= (data_setup_reg.bip_time * CLK_FREQ_HZ)) && data_setup_reg.bip_status) begin
                             bip <= 1;
                         end
+                        next_state <= next_state;
                     end
                 end
-                
+
                 default: next_state <= RESET;
 
             endcase
