@@ -178,10 +178,7 @@ module operacional (
 
             // Estado para atualização do Master PIN (implícito no diagrama)
             S_UPDATE_MASTER: begin
-                // Lógica para mostrar "UPDT" e aguardar novo master pin
-                // ... (a lógica exata dependeria do módulo update_master)
-                // Ao final do update, o diagrama sugere voltar a Montar PIN.
-                // update_master_end seria a condição de saída
+
                 next_state = S_MONTAR_PIN;
             end
 
