@@ -1,4 +1,3 @@
-
 module operacional (
     input   logic       clk, 
     input   logic       rst, 
@@ -24,9 +23,15 @@ module operacional (
     pinPac_t pin_sinal_interno;
     pinPac_t novo_master_pin_sinal;
     setupPac_t   data_setup_reg; // Registrador interno para a configuração
-    bcdPac_t   bcd_out_reg;
 
-    logic    senha_fail, senha_padrao, senha_master, senha_master_update, enable, bcd_enable_reg;
+    logic       senha_fail,
+                senha_padrao, 
+                senha_master, 
+                senha_master_update, 
+                enable,
+                update_master,
+                update_master_flag;
+;
     
     // Contadores
     logic [6:0] contador_falhas;
@@ -81,6 +86,23 @@ module operacional (
     
     // FIX: Ligar a saída 'data_setup_old' ao registrador interno
     assign data_setup_old = data_setup_reg;
+    assign update_master = (!senha_master_update && senha_master && !update_master_flag);
+	 
+	logic botao_interno_d1, botao_interno_d2;
+	logic botao_pressionado_pulso;
+
+	always_ff @(posedge clk or posedge rst) begin
+      if (rst) begin
+          botao_interno_d1 <= 0;
+          botao_interno_d2 <= 0;
+      end else begin
+          botao_interno_d1 <= botao_interno;
+          botao_interno_d2 <= botao_interno_d1;
+      end
+	end
+
+// Gera um pulso de 1 ciclo de clock quando o botão é pressionado
+	assign botao_pressionado_pulso = botao_interno_d1 && !botao_interno_d2;
 
     // --- Bloco de Transição de Estado ---
     always_ff @(posedge clk or posedge rst) begin: state_transition_block
@@ -88,6 +110,14 @@ module operacional (
             current_state <= RESET;
         end else begin
             current_state <= next_state;
+        end
+    end
+
+    always_ff @(posedge clk or posedge rst) begin
+        if (rst) begin
+            update_master_flag <= 1'b0;
+        end else if (update_master) begin
+            update_master_flag <= 1'b1;
         end
     end
 
@@ -100,9 +130,9 @@ module operacional (
             data_setup_reg.tranca_aut_time <= 5; 
             data_setup_reg.master_pin      <= '{status:1'b1, digit1:4'h1, digit2:4'h2, digit3:4'h3, digit4:4'h4}; 
             data_setup_reg.pin1            <= '{status:1'b1, digit1:4'h0, digit2:4'h0, digit3:4'h0, digit4:4'h0}; 
-            data_setup_reg.pin2.status     <= 1'b0;
-            data_setup_reg.pin3.status     <= 1'b0;
-            data_setup_reg.pin4.status     <= 1'b0;
+            data_setup_reg.pin2 <= '{default:'0};
+            data_setup_reg.pin3 <= '{default:'0};
+            data_setup_reg.pin4 <= '{default:'0};
             
             // Inicialização de saídas e contadores
             tranca <= 1'b1;
@@ -114,50 +144,48 @@ module operacional (
             contagem_travamento <= 0;
             contagem_bip <= 0;
             next_state <= RESET;
+            bcd_out <= '{default:'hB}; // 'C' para apagar ou traço, depende do driver
+            bcd_enable <= 1'b1;
+            
 
         end else begin
             // --- Valores Padrão para cada ciclo ---
-            next_state <= current_state;
-            bip <= 1'b0;
-            setup_on <= 1'b0;
             enable <= 1'b0;
-            bcd_out <= bcd_out_reg;
-            bcd_enable <= bcd_enable_reg;
-            bcd_enable_reg = 1'b0;
+            bcd_enable <= 1'b0; 
             
-            case(current_state)
+            case(next_state)
                 
                 RESET: begin
+                    bcd_out <= '{default:'hB}; // 'C' para apagar ou traço, depende do driver
+                    bcd_enable <= 1'b1;
                     tranca <= 1'b1; // Mantém travado no reset
-                    if(sensor_de_contato) begin
+                    if(!sensor_de_contato) begin
                         next_state <= MONTAR_PIN;
                     end
+                    else next_state <= next_state;
                 end
 
                 MONTAR_PIN: begin
-                    bcd_out_reg.BCD3 = pin_sinal_interno.digit1;
-                    bcd_out_reg.BCD2 = pin_sinal_interno.digit2;
-                    bcd_out_reg.BCD1 = pin_sinal_interno.digit3;
-                    bcd_out_reg.BCD0 = pin_sinal_interno.digit4;
-                    bcd_enable_reg = 1'b1;
+                    bcd_out.BCD3 <= pin_sinal_interno.digit1;
+                    bcd_out.BCD2 <= pin_sinal_interno.digit2;
+                    bcd_out.BCD1 <= pin_sinal_interno.digit3;
+                    bcd_out.BCD0 <= pin_sinal_interno.digit4;
+                    bcd_enable <= 1'b1;
                     tranca <= 1'b1;
-                    if(botao_interno) begin
+                    enable <= 1'b0; // Mantém o módulo de update habilitado
+                    if(botao_pressionado_pulso) begin
                         tranca <= 0;
                         next_state <= TRAVA_OFF;
                     end else if (pin_sinal_interno.status) begin // FIX: Aguarda um PIN completo
                         next_state <= VERIFICAR_SENHA;
                     end
+                    else next_state <= next_state;
                 end
 
                 VERIFICAR_SENHA: begin
-                    if(senha_master && !senha_master_update) begin
+                    if(update_master) begin
                         enable <= 1'b1; // Habilita o módulo de update
                         next_state <= UPDATE_MASTER;
-                    end
-                    else if (senha_master && senha_master_update) begin
-                        setup_on <= 1'b1; // Habilita o modo de configuração
-                        contador_falhas <= 0;
-                        next_state <= SETUP;
                     end
                     else if (senha_fail) begin
                         contador_falhas <= contador_falhas + 1;
@@ -174,53 +202,74 @@ module operacional (
                         tranca <= 0;
                         next_state <= TRAVA_OFF;
                     end
+                    else if (!update_master) begin
+                          setup_on <= 1'b1; // Habilita o modo de configuração
+                          
+                          contador_falhas <= 0;
+                          next_state <= SETUP;
+                      end
+                    
+                    else next_state <= next_state;
                 end
 
                 ESPERA: begin
                     
-                    bcd_out_reg = '{default:'hC}; // 'C' para apagar ou traço, depende do driver
-                    bcd_enable_reg = 1'b1;
+                    bcd_out <= '{default:'hA}; // 'C' para apagar ou traço, depende do driver
+                    bcd_enable <= 1'b1;
                     // FIX: Lógica de bloqueio temporário
                     tranca <= 1'b1; // Permanece travado
                     if (contagem_espera < (TEMPO_ESPERA_SEGUNDOS * CLK_FREQ_HZ)) begin
                         contagem_espera <= contagem_espera + 1;
-                    end else begin
+                    end 
+                    else begin
                         contador_falhas <= 0; // Zera as falhas
                         next_state <= MONTAR_PIN; // Volta à operação normal
                     end
                 end
 
                 UPDATE_MASTER: begin
+                    bcd_out.BCD3 <= pin_sinal_interno.digit1;
+                    bcd_out.BCD2 <= pin_sinal_interno.digit2;
+                    bcd_out.BCD1 <= pin_sinal_interno.digit3;
+                    bcd_out.BCD0 <= pin_sinal_interno.digit4;
+                    bcd_enable <= 1'b1;
                     // FIX: Lógica para atualizar o PIN mestre
                     enable <= 1'b1; // Mantém o módulo de update habilitado
                     if (novo_master_pin_sinal.status) begin // Aguarda o novo PIN ser montado
-                        data_setup_reg.master_pin <= novo_master_pin_sinal; // Atualiza o registrador
+                        data_setup_reg.master_pin <= novo_master_pin_sinal; // Atualiza o registrador                      	
                         next_state <= MONTAR_PIN;
                     end
+                    else next_state <= next_state;
                 end
 
                 SETUP: begin
                     setup_on <= 1'b1; // Mantém o sinal ativo
-                    if(setup_end) begin
+                    if(!setup_end) begin
                         data_setup_reg <= data_setup_new; // FIX: Carrega a nova configuração
                         setup_on <= 0;
                         next_state <= MONTAR_PIN;
                     end
+                    else next_state <= next_state;
                 end
                 
                 TRAVA_OFF: begin
+                    
+                    bcd_out <= '{default:'hB};
+                    bcd_enable <= 1'b1;
                     next_state <= PORTA_FECHADA;
                 end
                 TRAVA_ON: begin
+                    contagem_travamento <= 0;
                     next_state <= MONTAR_PIN;
                 end
                 
                 PORTA_FECHADA: begin
-                    if (!sensor_de_contato) begin
+                    if (sensor_de_contato) begin
                         contagem_travamento <= 0;
                         next_state <= PORTA_ABERTA;
                     end
-                    else if ((contagem_travamento >= (data_setup_reg.tranca_aut_time * CLK_FREQ_HZ)) || botao_interno) begin
+                    else if ((contagem_travamento >= (data_setup_reg.tranca_aut_time * CLK_FREQ_HZ)) || botao_pressionado_pulso) begin
+                        tranca <= 1'b1;
                         next_state <= TRAVA_ON;
                     end
                     else begin
@@ -230,7 +279,7 @@ module operacional (
                 end
 
                 PORTA_ABERTA: begin
-                    if (sensor_de_contato) begin
+                    if (!sensor_de_contato) begin
                         contagem_bip <= 0;
                         contagem_travamento <= 0; 
                         bip <= 0;
