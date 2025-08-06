@@ -11,6 +11,9 @@ module setup(
     output	logic 		setup_end
  );
 
+function automatic logic is_valid_digit(input logic [3:0] digit);
+    return (digit <= 4'd9); 
+endfunction
 
 typedef enum logic [3:0] {
     IDLE,
@@ -26,31 +29,29 @@ typedef enum logic [3:0] {
     PIN_4_ON,
     PIN_4,
     TX,
+	 DOWN,
+	 WAIT,
     UP
 } state_t;
 
 state_t current_state, next_state;
+pinPac_t pin_sinal_interno;
 
-localparam KEY_SEND = 4'hF; 
+montar_pin u_montar_pin (
+    .clk(clk),
+    .rst(rst),
+    .key_valid(key_valid),
+    .key_code(key_code),
+    .pin_out(pin_sinal_interno)
+);
+
 // Registradores temporários para a entrada de dados
 logic [3:0] bip_time_digit2, bip_time_digit1;       // Para o tempo do bip
 logic [3:0] auto_lock_digit2, auto_lock_digit1;
 logic [6:0] tempo_local;    // Para o tempo de auto-lock
 
-// --- Lógica de Detecção de Borda ---
-logic tecla_valid_d1;
-logic tecla_valid_posedge;
 setupPac_t data_setup;
 
-always_ff @(posedge clk or posedge rst) begin:DetectorDeBorda
-        if (rst) begin
-            tecla_valid_d1 <= 1'b0;
-        end else begin
-            tecla_valid_d1 <= key_valid;
-        end
-end:DetectorDeBorda
-
-assign tecla_valid_posedge = key_valid && !tecla_valid_d1;
 
 always_ff @(posedge clk or posedge rst) begin:state_block
     if (rst) begin
@@ -64,17 +65,15 @@ end:state_block
 always_ff @(posedge clk or posedge rst) begin:FSM
     if (rst) begin
         data_setup <= '{default:'0};
-        bcd_out = '{default:'0};
+        bcd_out = '{default:4'hB};
         next_state = IDLE;
         bcd_enable <= 1'b0;
-        setup_end <= 0;
+        setup_end <= 1;
     end else begin
 
     // --- Valores Padrão para cada ciclo ---
-    next_state <= current_state;
     bcd_enable <= 1'b0; 
-    bcd_out    <= '{default:'0};
-    setup_end <= 0;
+    
         
     case (current_state)
 
@@ -86,65 +85,91 @@ always_ff @(posedge clk or posedge rst) begin:FSM
     end
     RX: begin
         data_setup <= data_setup_old;
+        bcd_enable <= 1'b1;
+        bcd_out.BCD5 <= 0;
+        bcd_out.BCD4 <= 1;
+        bcd_out.BCD3 <= 11;
+        bcd_out.BCD2 <= 11;
+        bcd_out.BCD1 <= 11;
+        bcd_out.BCD0 <= data_setup.bip_status;
         next_state <= BIP_ON;
     end
      BIP_ON: begin
             bcd_enable <= 1'b1;
             bcd_out.BCD5 <= 0;
             bcd_out.BCD4 <= 1;
+            bcd_out.BCD3 <= 11;
+            bcd_out.BCD2 <= 11;
+            bcd_out.BCD1 <= 11;
             bcd_out.BCD0 <= data_setup.bip_status;
 
-        if (tecla_valid_posedge) begin
-            if (key_code == 1 || key_code == 0) begin
-                data_setup.bip_status <= key_code;
-            end
-            else if (key_code == KEY_SEND) begin
-            
-                bip_time_digit1 <= 4'd0;
-                bip_time_digit2 <= 4'd0;
+            if (pin_sinal_interno.status && (data_setup.bip_status == 0 || data_setup.bip_status == 1)) begin
+					
+                bip_time_digit1 <= data_setup.bip_time / 10;
+                bip_time_digit2 <= data_setup.bip_time % 10;
                 tempo_local <= 0;
+                bcd_enable <= 1'b1;
+                bcd_out.BCD5 <= 0;
+                bcd_out.BCD4 <= 2;
+                bcd_out.BCD3 <= 11;
+                bcd_out.BCD2 <= 11;
+                bcd_out.BCD1 <= bip_time_digit1;
+                bcd_out.BCD0 <= bip_time_digit2;
                 next_state <= BIP_TIME;
             end
-        end
-        else next_state <= next_state;
+            else if ((pin_sinal_interno.digit1 == 1) || (pin_sinal_interno.digit1 == 0)) begin
+                data_setup.bip_status <= pin_sinal_interno.digit1;
+            end
+            else next_state <= next_state;
     end
 
     BIP_TIME: begin
         bcd_enable <= 1'b1;
         bcd_out.BCD5 <= 0;
         bcd_out.BCD4 <= 2;
-        bcd_out.BCD1 <= bip_time_digit2;
-        bcd_out.BCD0 <= bip_time_digit1;
+        bcd_out.BCD3 <= 11;
+        bcd_out.BCD2 <= 11;
+        bcd_out.BCD1 <= bip_time_digit1;
+        bcd_out.BCD0 <= bip_time_digit2;
 
-        if (tecla_valid_posedge) begin
-            if (key_code <= 9 && key_code >= 0) begin
-                bip_time_digit2 <= bip_time_digit1;
-                bip_time_digit1 <= key_code;
-            end
-            else if (key_code == KEY_SEND) begin
-                
-               
-                tempo_local = (bip_time_digit2 * 10) + bip_time_digit1;
-                
+
+        if(pin_sinal_interno.status && (
+            is_valid_digit(bip_time_digit1) &&
+            is_valid_digit(bip_time_digit2))) begin
             
-                if (tempo_local > 60) begin
-                    data_setup.bip_time <= 7'd60; // Trava no máximo
-                end 
-                else if (tempo_local < 5) begin
-                    data_setup.bip_time <= 7'd5;  // Trava no mínimo
-                end 
-                else begin
-                    data_setup.bip_time <= tempo_local; // Usa o valor válido
-                end
-                
-                // Prepara para o próximo estado
-                auto_lock_digit1 <= 4'd0;
-                auto_lock_digit2 <= 4'd0;
-                tempo_local <= 0;
-                next_state <= AUTO_LOCK;
-
+            
+            tempo_local = (bip_time_digit2 * 10) + bip_time_digit1;
+            
+        
+            if (tempo_local > 60) begin
+                data_setup.bip_time <= 7'd60; // Trava no máximo
+            end 
+            else if (tempo_local < 5) begin
+                data_setup.bip_time <= 7'd5;  // Trava no mínimo
+            end 
+            else begin
+                data_setup.bip_time <= tempo_local; // Usa o valor válido
             end
-        end 
+            
+            auto_lock_digit1 <= data_setup.tranca_aut_time / 10;
+            auto_lock_digit2 <= data_setup.tranca_aut_time % 10;
+            tempo_local <= 0;
+            bcd_enable <= 1'b1;
+            bcd_out.BCD5 <= 0;
+            bcd_out.BCD4 <= 3;
+            bcd_out.BCD3 <= 11;
+            bcd_out.BCD2 <= 11;
+            bcd_out.BCD1 <= auto_lock_digit1;
+            bcd_out.BCD0 <= auto_lock_digit2;
+            next_state <= AUTO_LOCK;
+
+        end
+            
+        else if (pin_sinal_interno.digit1 <= 9 && pin_sinal_interno.digit1 >= 0) begin
+            bip_time_digit2 <= pin_sinal_interno.digit1;
+            bip_time_digit1 <= pin_sinal_interno.digit2;
+        end
+        
         else next_state <= next_state;
     end
 
@@ -152,70 +177,104 @@ always_ff @(posedge clk or posedge rst) begin:FSM
         bcd_enable <= 1'b1;
         bcd_out.BCD5 <= 0;
         bcd_out.BCD4 <= 3;
-        bcd_out.BCD1 <= auto_lock_digit2;
-        bcd_out.BCD0 <= auto_lock_digit1;
-        if (tecla_valid_posedge) begin
-
-            if (key_code <= 9 && key_code >= 0) begin
-                auto_lock_digit2 <= auto_lock_digit1;
-                auto_lock_digit1 <= key_code;
+        bcd_out.BCD3 <= 11;
+        bcd_out.BCD2 <= 11;
+        bcd_out.BCD1 <= auto_lock_digit1;
+        bcd_out.BCD0 <= auto_lock_digit2;
+		  
+		   if(pin_sinal_interno.status && (
+            is_valid_digit(auto_lock_digit1) &&
+            is_valid_digit(auto_lock_digit2))) begin
+            
+            tempo_local = (auto_lock_digit2 * 10) + auto_lock_digit1;
+            
+        
+            if (tempo_local > 60) begin
+                data_setup.tranca_aut_time <= 7'd60; // Trava no máximo
+            end 
+            else if (tempo_local < 5) begin
+                data_setup.tranca_aut_time <= 7'd5;  // Trava no mínimo
+            end 
+            else begin
+                data_setup.tranca_aut_time <= tempo_local; // Usa o valor válido
             end
 
-            else if (key_code == KEY_SEND) begin
+            bcd_enable <= 1'b1;
+            bcd_out.BCD5 <= 0; 
+            bcd_out.BCD4 <= 4;
+            bcd_out.BCD3 <= data_setup.pin1.digit1;
+            bcd_out.BCD2 <= data_setup.pin1.digit2;
+            bcd_out.BCD1 <= data_setup.pin1.digit3; 
+            bcd_out.BCD0 <= data_setup.pin1.digit4;
             
-                
-                tempo_local = (auto_lock_digit2 * 10) + auto_lock_digit1;
-                
-            
-                if (tempo_local > 60) begin
-                    data_setup.tranca_aut_time <= 7'd60; // Trava no máximo
-                end 
-                else if (tempo_local < 5) begin
-                    data_setup.tranca_aut_time <= 7'd5;  // Trava no mínimo
-                end 
-                else begin
-                    data_setup.tranca_aut_time <= tempo_local; // Usa o valor válido
-                end
-                
-                next_state <= PIN_1;
-            end
-        end 
+            next_state <= PIN_1;
+        end
+		  
+        else if (is_valid_digit(pin_sinal_interno.digit1)) begin
+            auto_lock_digit2 <= pin_sinal_interno.digit1;
+            auto_lock_digit1 <= pin_sinal_interno.digit2;
+        end
+
+
         else next_state <= next_state;
     end
     PIN_1: begin
         bcd_enable <= 1'b1;
         bcd_out.BCD5 <= 0; 
         bcd_out.BCD4 <= 4;
-        bcd_out.BCD3 <= data_setup.pin1.digit4;
-        bcd_out.BCD2 <= data_setup.pin1.digit3;
-        bcd_out.BCD1 <= data_setup.pin1.digit2; 
-        bcd_out.BCD0 <= data_setup.pin1.digit1;
-        if(tecla_valid_posedge) begin
-            if (key_code <= 9 && key_code >= 0 ) begin
-                data_setup.pin1.digit1 <= data_setup.pin1.digit2;
-                data_setup.pin1.digit2 <= data_setup.pin1.digit3;
-                data_setup.pin1.digit3 <= data_setup.pin1.digit4;
-                data_setup.pin1.digit4 <= key_code;
-            end
-            else if(key_code == KEY_SEND) begin
-                next_state <= PIN_2_ON;
-            end
+        bcd_out.BCD3 <= data_setup.pin1.digit1;
+        bcd_out.BCD2 <= data_setup.pin1.digit2;
+        bcd_out.BCD1 <= data_setup.pin1.digit3; 
+        bcd_out.BCD0 <= data_setup.pin1.digit4;
+		  
+		  if(pin_sinal_interno.status && (
+            is_valid_digit(data_setup.pin1.digit1) &&
+            is_valid_digit(data_setup.pin1.digit2) &&
+            is_valid_digit(data_setup.pin1.digit3) &&
+            is_valid_digit(data_setup.pin1.digit4))) begin
+            bcd_enable <= 1'b1;
+            bcd_out.BCD5 <= 0; 
+            bcd_out.BCD4 <= 5;
+            bcd_out.BCD3 <= 11;
+            bcd_out.BCD2 <= 11;
+            bcd_out.BCD1 <= 11; 
+            bcd_out.BCD0 <= data_setup.pin2.status;
+            next_state <= PIN_2_ON;
         end
+		  
+        else if (is_valid_digit(pin_sinal_interno.digit1)) begin
+            data_setup.pin1.digit1 <= pin_sinal_interno.digit4;
+            data_setup.pin1.digit2 <= pin_sinal_interno.digit3;
+            data_setup.pin1.digit3 <= pin_sinal_interno.digit2;
+            data_setup.pin1.digit4 <= pin_sinal_interno.digit1;
+        end
+
         else next_state <= next_state;
     end
     PIN_2_ON: begin
         bcd_enable <= 1'b1;
         bcd_out.BCD5 <= 0; 
-        bcd_out.BCD4 <= 5; 
+        bcd_out.BCD4 <= 5;
+        bcd_out.BCD3 <= 11;
+        bcd_out.BCD2 <= 11;
+        bcd_out.BCD1 <= 11; 
         bcd_out.BCD0 <= data_setup.pin2.status; 
-        if(tecla_valid_posedge) begin
-            if (key_code == 1 || key_code == 0) begin
-                data_setup.pin2.status <= key_code;
-            end
-            else if(key_code == KEY_SEND) begin
-                next_state <= PIN_2;
-            end
+		  
+		  if(pin_sinal_interno.status && (data_setup.pin2.status == 0 || data_setup.pin2.status == 1)) begin
+            bcd_enable <= 1'b1;
+            bcd_out.BCD5 <= 0; 
+            bcd_out.BCD4 <= 6;
+            bcd_out.BCD3 <= data_setup.pin2.digit1;
+            bcd_out.BCD2 <= data_setup.pin2.digit2;
+            bcd_out.BCD1 <= data_setup.pin2.digit3; 
+            bcd_out.BCD0 <= data_setup.pin2.digit4;
+            next_state <= PIN_2;
         end
+        
+        else if (pin_sinal_interno.digit1 == 1 || pin_sinal_interno.digit1 == 0) begin
+            data_setup.pin2.status <= pin_sinal_interno.digit1;
+        end
+
         else next_state <= next_state;
     
     end
@@ -223,36 +282,60 @@ always_ff @(posedge clk or posedge rst) begin:FSM
         bcd_enable <= 1'b1;
         bcd_out.BCD5 <= 0; 
         bcd_out.BCD4 <= 6;
-        bcd_out.BCD3 <= data_setup.pin2.digit4;
-        bcd_out.BCD2 <= data_setup.pin2.digit3;
-        bcd_out.BCD1 <= data_setup.pin2.digit2; 
-        bcd_out.BCD0 <= data_setup.pin2.digit1;
-        if(tecla_valid_posedge) begin
-            if (key_code <= 9 && key_code >= 0 ) begin
-                data_setup.pin2.digit1 <= data_setup.pin2.digit2;
-                data_setup.pin2.digit2 <= data_setup.pin2.digit3;
-                data_setup.pin2.digit3 <= data_setup.pin2.digit4;
-                data_setup.pin2.digit4 <= key_code;
-            end
-            else if(key_code == KEY_SEND) begin
-                next_state <= PIN_3_ON;
-            end
+        bcd_out.BCD3 <= data_setup.pin2.digit1;
+        bcd_out.BCD2 <= data_setup.pin2.digit2;
+        bcd_out.BCD1 <= data_setup.pin2.digit3; 
+        bcd_out.BCD0 <= data_setup.pin2.digit4;
+		  
+		if(pin_sinal_interno.status && (
+            is_valid_digit(data_setup.pin2.digit1) &&
+            is_valid_digit(data_setup.pin2.digit2) &&
+            is_valid_digit(data_setup.pin2.digit3) &&
+            is_valid_digit(data_setup.pin2.digit4))) begin
+            bcd_enable <= 1'b1;
+            bcd_out.BCD5 <= 0; 
+            bcd_out.BCD4 <= 7;
+            bcd_out.BCD3 <= 11;
+            bcd_out.BCD2 <= 11;
+            bcd_out.BCD1 <= 11; 
+            bcd_out.BCD0 <= data_setup.pin3.status;
+            next_state <= PIN_3_ON;
         end
+		  
+        
+        else if (pin_sinal_interno.digit1 <= 9 && pin_sinal_interno.digit1 >= 0 ) begin
+            data_setup.pin2.digit1 <= pin_sinal_interno.digit4;
+            data_setup.pin2.digit2 <= pin_sinal_interno.digit3;
+            data_setup.pin2.digit3 <= pin_sinal_interno.digit2;
+            data_setup.pin2.digit4 <= pin_sinal_interno.digit1;
+        end
+
         else next_state <= next_state;
     end
     PIN_3_ON: begin
         bcd_enable <= 1'b1;
         bcd_out.BCD5 <= 0; 
-        bcd_out.BCD4 <= 7; 
+        bcd_out.BCD4 <= 7;
+        bcd_out.BCD3 <= 11;
+        bcd_out.BCD2 <= 11;
+        bcd_out.BCD1 <= 11; 
         bcd_out.BCD0 <= data_setup.pin3.status;
-        if(tecla_valid_posedge) begin
-            if (key_code == 1 || key_code == 0) begin
-                data_setup.pin3.status <= key_code;
-            end
-            else if(key_code == KEY_SEND) begin
-                next_state <= PIN_3;
-            end
+        
+        if(pin_sinal_interno.status && (data_setup.pin3.status == 0 || data_setup.pin3.status == 1)) begin
+            next_state <= PIN_3;
+            bcd_enable <= 1'b1;
+            bcd_out.BCD5 <= 0; 
+            bcd_out.BCD4 <= 8;
+            bcd_out.BCD3 <= data_setup.pin3.digit1;
+            bcd_out.BCD2 <= data_setup.pin3.digit2;
+            bcd_out.BCD1 <= data_setup.pin3.digit3; 
+            bcd_out.BCD0 <= data_setup.pin3.digit4;
         end
+		  
+        else if (pin_sinal_interno.digit1 == 1 || pin_sinal_interno.digit1 == 0) begin
+            data_setup.pin3.status <= pin_sinal_interno.digit1;
+        end
+
         else next_state <= next_state;
     
     end
@@ -260,36 +343,57 @@ always_ff @(posedge clk or posedge rst) begin:FSM
         bcd_enable <= 1'b1;
         bcd_out.BCD5 <= 0; 
         bcd_out.BCD4 <= 8;
-        bcd_out.BCD3 <= data_setup.pin3.digit4;
-        bcd_out.BCD2 <= data_setup.pin3.digit3;
-        bcd_out.BCD1 <= data_setup.pin3.digit2; 
-        bcd_out.BCD0 <= data_setup.pin3.digit1;
-        if(tecla_valid_posedge) begin
-            if (key_code <= 9 && key_code >= 0 ) begin
-                data_setup.pin3.digit1 <= data_setup.pin3.digit2;
-                data_setup.pin3.digit2 <= data_setup.pin3.digit3;
-                data_setup.pin3.digit3 <= data_setup.pin3.digit4;
-                data_setup.pin3.digit4 <= key_code;
-            end
-            else if(key_code == KEY_SEND) begin
+        bcd_out.BCD3 <= data_setup.pin3.digit1;
+        bcd_out.BCD2 <= data_setup.pin3.digit2;
+        bcd_out.BCD1 <= data_setup.pin3.digit3; 
+        bcd_out.BCD0 <= data_setup.pin3.digit4;
+		  
+		  if(pin_sinal_interno.status && (
+            is_valid_digit(data_setup.pin3.digit1) &&
+            is_valid_digit(data_setup.pin3.digit2) &&
+            is_valid_digit(data_setup.pin3.digit3) &&
+            is_valid_digit(data_setup.pin3.digit4))) begin
+                bcd_enable <= 1'b1;
+                bcd_out.BCD5 <= 0; 
+                bcd_out.BCD4 <= 9;
+                bcd_out.BCD3 <= 11;
+                bcd_out.BCD2 <= 11;
+                bcd_out.BCD1 <= 11; 
+                bcd_out.BCD0 <= data_setup.pin4.status;
                 next_state <= PIN_4_ON;
-            end
-        end
+			end
+				 
+        else if (pin_sinal_interno.digit1 <= 9 && pin_sinal_interno.digit1 >= 0 ) begin
+				 data_setup.pin3.digit1 <= pin_sinal_interno.digit4;
+				 data_setup.pin3.digit2 <= pin_sinal_interno.digit3;
+				 data_setup.pin3.digit3 <= pin_sinal_interno.digit2;
+				 data_setup.pin3.digit4 <= pin_sinal_interno.digit1;
+			end
+
         else next_state <= next_state;
     end
     PIN_4_ON: begin
         bcd_enable <= 1'b1;
         bcd_out.BCD5 <= 0; 
-        bcd_out.BCD4 <= 9; 
+        bcd_out.BCD4 <= 9;
+        bcd_out.BCD3 <= 11;
+        bcd_out.BCD2 <= 11;
+        bcd_out.BCD1 <= 11; 
         bcd_out.BCD0 <= data_setup.pin4.status;
-        if(tecla_valid_posedge) begin
-            if (key_code == 1 || key_code == 0) begin
-                data_setup.pin4.status <= key_code;
-            end
-            else if(key_code == KEY_SEND) begin
-                next_state <= PIN_4;
-            end
+        if(pin_sinal_interno.status && (data_setup.pin4.status == 0 || data_setup.pin4.status == 1)) begin
+            bcd_enable <= 1'b1;
+            bcd_out.BCD5 <= 1; 
+            bcd_out.BCD4 <= 0;
+            bcd_out.BCD3 <= data_setup.pin4.digit1;
+            bcd_out.BCD2 <= data_setup.pin4.digit2;
+            bcd_out.BCD1 <= data_setup.pin4.digit3; 
+            bcd_out.BCD0 <= data_setup.pin4.digit4;
+            next_state <= PIN_4;
         end
+			
+			else if (pin_sinal_interno.digit1 == 1 || pin_sinal_interno.digit1 == 0) begin
+				 data_setup.pin4.status <= pin_sinal_interno.digit1;
+			end
         else next_state <= next_state;
     
     end
@@ -297,27 +401,43 @@ always_ff @(posedge clk or posedge rst) begin:FSM
         bcd_enable <= 1'b1;
         bcd_out.BCD5 <= 1; 
         bcd_out.BCD4 <= 0;
-        bcd_out.BCD3 <= data_setup.pin4.digit4;
-        bcd_out.BCD2 <= data_setup.pin4.digit3;
-        bcd_out.BCD1 <= data_setup.pin4.digit2; 
-        bcd_out.BCD0 <= data_setup.pin4.digit1;
-        if(tecla_valid_posedge) begin
-            if (key_code <= 9 && key_code >= 0 ) begin
-                data_setup.pin4.digit1 <= data_setup.pin4.digit2;
-                data_setup.pin4.digit2 <= data_setup.pin4.digit3;
-                data_setup.pin4.digit3 <= data_setup.pin4.digit4;
-                data_setup.pin4.digit4 <= key_code;
-            end
-            else if(key_code == KEY_SEND) begin
-                next_state <= TX;
-            end
-        end
+        bcd_out.BCD3 <= data_setup.pin4.digit1;
+        bcd_out.BCD2 <= data_setup.pin4.digit2;
+        bcd_out.BCD1 <= data_setup.pin4.digit3; 
+        bcd_out.BCD0 <= data_setup.pin4.digit4;
+		  
+		  if(pin_sinal_interno.status && (
+            is_valid_digit(data_setup.pin4.digit1) &&
+            is_valid_digit(data_setup.pin4.digit2) &&
+            is_valid_digit(data_setup.pin4.digit3) &&
+            is_valid_digit(data_setup.pin4.digit4))) begin
+				 next_state <= TX;
+			end
+		  
+			
+			else if (pin_sinal_interno.digit1 <= 9 && pin_sinal_interno.digit1 >= 0 ) begin
+				 data_setup.pin4.digit1 <= pin_sinal_interno.digit4;
+				 data_setup.pin4.digit2 <= pin_sinal_interno.digit3;
+				 data_setup.pin4.digit3 <= pin_sinal_interno.digit2;
+				 data_setup.pin4.digit4 <= pin_sinal_interno.digit1;
+			end
+	  
         else next_state <= next_state;
     end
     TX: begin
         data_setup_new <= data_setup;
-        next_state <= UP;
-    end   
+        next_state <= DOWN;
+    end
+	 DOWN: begin
+		setup_end <= 0;
+		next_state <= WAIT;
+	 end
+	 WAIT: begin
+		if (!setup_on) begin
+			next_state <= UP;
+		end
+		else next_state <= next_state;
+	 end
     UP: begin
         setup_end <= 1;
         next_state <= IDLE;
