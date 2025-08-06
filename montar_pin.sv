@@ -6,9 +6,13 @@ module montar_pin (
     output pinPac_t pin_out
 );
 
+
+    function automatic logic is_valid_digit(input logic [3:0] digit);
+        return (digit <= 4'd9); 
+    endfunction
     // --- Constantes ---
     localparam KEY_SEND = 4'hF; 
-    localparam DIGIT_BLANK = 4'hA; 
+    localparam DIGIT_BLANK = 4'hE; 
 
     // Flag auxiliar para gerenciar a limpeza do PIN no ciclo seguinte ao envio/limissão.
     logic pending_clear;
@@ -74,13 +78,13 @@ module montar_pin (
 
                 end
                 else begin // É um dígito normal (0-9, A-D)
-
-                    pin_out.digit1 <= pin_out.digit2;
-                    pin_out.digit2 <= pin_out.digit3;
-                    pin_out.digit3 <= pin_out.digit4;
-                    pin_out.digit4 <= key_code;
-                    pin_out.status <= 1'b0;
-                    pending_clear <= 1'b0;
+                    if(is_valid_digit(key_code))
+                        pin_out.digit4 <= pin_out.digit3;
+                        pin_out.digit3 <= pin_out.digit2;
+                        pin_out.digit2 <= pin_out.digit1;
+                        pin_out.digit1 <= key_code;
+                        pin_out.status <= 1'b0;
+                        pending_clear <= 1'b0;
 
                 end
             end
